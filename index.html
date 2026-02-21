@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ONEESHI - Juego de Memoria</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<section id="Oneeshi">
+  <div class="contacto-boton">
+    <a href="https://oneeshi.uwu.ai/" target="_blank">
+      <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQqjySkNI9hCOwtHcQZAQk9pZkDPoiblrQZAA&s" alt="Oneeshi enlace">
+    </a>
+  </div>
+</section>
+
+<div id="game-container">
+    <div id="prep-message" class="hidden" style="color: var(--accent); font-weight: bold; margin-bottom: 10px; font-size: 1.2rem;">
+        🧠 ¡Memoriza las posiciones! Inicio en: <span id="prep-countdown">8</span>s
+    </div>
+
+    <div id="status-area" class="status-bar hidden">
+        <div>⏱️ <span id="timer">00:00:00</span></div>
+        <div>❌ Errores: <span id="errors">0</span></div>
+        <div>🔄 Turno: <span id="current-turn">Jugador 1</span></div>
+    </div>
+
+    <div id="menu" class="menu-screen">
+        <button class="btn-mode" onclick="setMode('solo', this)">SOLITARIO</button>
+        <button class="btn-mode" onclick="setMode('friend', this)">CON UN AMIGO</button>
+        <button class="btn-mode" onclick="setMode('cpu', this)">CONTRA LA CONSOLA</button>
+        
+        <div id="cpu-options" class="hidden">
+            <p>DIFICULTAD:</p>
+            <button class="btn-diff" onclick="setDiff(0.2, this)">FÁCIL</button>
+            <button class="btn-diff" onclick="setDiff(0.5, this)">NORMAL</button>
+            <button class="btn-diff" onclick="setDiff(0.9, this)">DIFÍCIL</button>
+        </div>
+
+        <div id="grid-selection">
+            <p>Tamaño del Tablero:</p>
+            <select id="grid-size">
+                <option value="4x3">4 x 3 (12 cartas)</option>
+                <option value="4x4">4 x 4 (16 cartas)</option>
+                <option value="5x6">5 x 6 (30 cartas)</option>
+                <option value="6x4">6 x 4 (24 cartas)</option>
+                <option value="8x6">8 x 6 (48 cartas)</option>
+            </select>
+        </div>
+
+        <button class="btn-main" id="start-btn" onclick="startGame()">¡JUGAR!</button>
+    </div>
+
+    <div id="board" class="hidden"></div>
+</div>
+
+<div id="overlay" class="hidden">
+    <h1 id="win-text">---</h1> <p id="final-stats" style="font-size: 1.2rem; margin-bottom: 20px;"></p>
+    <button class="btn-main" onclick="resetGame()">JUGAR DE NUEVO</button>
+</div>
+
+<footer>
+    <p>© ONEESHI 2026</p>
+</footer>
+
+<script>
+const images = [
+    "https://oneeshi.uwu.ai/assets/images/image13.png?v=4f664de9",
+    "https://oneeshi.uwu.ai/assets/images/image02.png?v=4f664de9",
+    "https://oneeshi.uwu.ai/assets/images/image07.png?v=4f664de9",
+    "https://oneeshi.uwu.ai/assets/images/image03.png?v=4f664de9",
+    "https://oneeshi.uwu.ai/assets/images/image04.png?v=4f664de9",
+    "https://oneeshi.uwu.ai/assets/images/image05.png?v=4f664de9",
+];
+
+let gameMode = null, difficulty = 0.5, flippedCards = [], matchedPairs = 0;
+let errors = 0, timerInterval, prepInterval, seconds = 0, currentPlayer = 1;
+let isLock = false, scores = { p1: 0, p2: 0, cpu: 0 }, totalPossiblePairs = 0;
+
+function setMode(mode, btn) {
+    gameMode = mode;
+    document.getElementById('cpu-options').className = (mode === 'cpu') ? '' : 'hidden';
+    document.querySelectorAll('.btn-mode').forEach(b => b.classList.remove('selected-mode'));
+    btn.classList.add('selected-mode');
+}
+
+function setDiff(val, btn) {
+    difficulty = val;
+    document.querySelectorAll('.btn-diff').forEach(b => b.style.border = "none");
+    btn.style.border = "3px solid white";
+}
+
+function startGame() {
+    if (!gameMode) return alert("SELECCIONA EL MODO DE JUEGO");
+
+    const size = document.getElementById('grid-size').value.split('x');
+    const cols = parseInt(size[0]), rows = parseInt(size[1]);
+    totalPossiblePairs = (cols * rows) / 2;
+
+    let deck = [];
+    for(let i=0; i < totalPossiblePairs; i++) {
+        let img = images[i % images.length];
+        deck.push(img, img);
+    }
+    deck.sort(() => Math.random() - 0.5);
+
+    document.getElementById('menu').classList.add('hidden');
+    document.getElementById('status-area').classList.remove('hidden');
+    
+    const board = document.getElementById('board');
+    board.classList.remove('hidden');
+    board.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    board.innerHTML = '';
+
+    deck.forEach(img => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.dataset.value = img;
+        card.innerHTML = `<div class="card-face card-front"></div>
+                          <div class="card-back card-face"><img src="${img}"></div>`;
+        card.onclick = () => handleCardClick(card);
+        board.appendChild(card);
+    });
+
+    // --- FASE DE MEMORIZACIÓN (8 SEGUNDOS) ---
+    isLock = true;
+    const allCards = document.querySelectorAll('.card');
+    const prepMsg = document.getElementById('prep-message');
+    const countdownSpan = document.getElementById('prep-countdown');
+    let timeLeft = 8; // Ajustado al rango solicitado
+
+    allCards.forEach(card => card.classList.add('flipped'));
+    prepMsg.classList.remove('hidden');
+    countdownSpan.innerText = timeLeft;
+
+    clearInterval(prepInterval);
+    prepInterval = setInterval(() => {
+        timeLeft--;
+        countdownSpan.innerText = timeLeft;
+        if (timeLeft <= 0) {
+            clearInterval(prepInterval);
+            allCards.forEach(card => card.classList.remove('flipped'));
+            prepMsg.classList.add('hidden');
+            isLock = false;
+            startTimer();
+        }
+    }, 1000);
+
+    resetStats();
+}
+
+function startTimer() {
+    clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+        seconds++;
+        document.getElementById('timer').innerText = new Date(seconds * 1000).toISOString().substr(11, 8);
+    }, 1000);
+}
+
+function handleCardClick(card) {
+    if (isLock || card.classList.contains('flipped') || card.classList.contains('matched')) return;
+    if (gameMode === 'cpu' && currentPlayer === 2) return;
+    
+    card.classList.add('flipped');
+    flippedCards.push(card);
+
+    if (flippedCards.length === 2) checkMatch();
+}
+
+function checkMatch() {
+    isLock = true;
+    const [c1, c2] = flippedCards;
+    const isMatch = c1.dataset.value === c2.dataset.value;
+
+    if (isMatch) {
+        matchedPairs++;
+        if (currentPlayer === 1) scores.p1++; else scores[gameMode === 'cpu' ? 'cpu' : 'p2']++;
+        
+        setTimeout(() => {
+            c1.classList.add('matched'); c2.classList.add('matched');
+            flippedCards = []; isLock = false;
+            if (matchedPairs === totalPossiblePairs) endGame();
+            else if (gameMode === 'cpu' && currentPlayer === 2) setTimeout(cpuMove, 600);
+        }, 600);
+    } else {
+        errors++;
+        document.getElementById('errors').innerText = errors;
+        setTimeout(() => {
+            c1.classList.remove('flipped'); c2.classList.remove('flipped');
+            flippedCards = [];
+            isLock = false;
+            if (gameMode !== 'solo') switchTurn();
+        }, 1000);
+    }
+}
+
+function switchTurn() {
+    currentPlayer = currentPlayer === 1 ? 2 : 1;
+    document.getElementById('current-turn').innerText = (gameMode === 'cpu' && currentPlayer === 2) ? "Consola" : `Jugador ${currentPlayer}`;
+    if (gameMode === 'cpu' && currentPlayer === 2) setTimeout(cpuMove, 800);
+}
+
+function cpuMove() {
+    const available = [...document.querySelectorAll('.card:not(.flipped):not(.matched)')];
+    if (available.length < 2) return;
+
+    let c1 = available[Math.floor(Math.random() * available.length)];
+    c1.classList.add('flipped');
+    flippedCards.push(c1);
+
+    setTimeout(() => {
+        const after = [...document.querySelectorAll('.card:not(.flipped):not(.matched)')];
+        let c2 = (Math.random() < difficulty) 
+                 ? after.find(c => c.dataset.value === c1.dataset.value) || after[Math.floor(Math.random() * after.length)]
+                 : after[Math.floor(Math.random() * after.length)];
+        c2.classList.add('flipped');
+        flippedCards.push(c2);
+        checkMatch();
+    }, 700);
+}
+
+function resetStats() {
+    seconds = 0; errors = 0; matchedPairs = 0; currentPlayer = 1;
+    scores = { p1: 0, p2: 0, cpu: 0 };
+    document.getElementById('errors').innerText = "0";
+    document.getElementById('timer').innerText = "00:00:00";
+}
+
+function endGame() {
+    clearInterval(timerInterval);
+    const overlay = document.getElementById('overlay');
+    const winText = document.getElementById('win-text');
+    overlay.classList.remove('hidden');
+
+    let resultMsg = "";
+
+    if (gameMode === 'solo') {
+        resultMsg = "¡FELICIDADES!";
+    } 
+    else if (gameMode === 'friend') {
+        if (scores.p1 > scores.p2) resultMsg = "¡GANÓ EL JUGADOR 1!";
+        else if (scores.p2 > scores.p1) resultMsg = "¡GANÓ EL JUGADOR 2!";
+        else resultMsg = "¡ES UN EMPATE!";
+    } 
+    else if (gameMode === 'cpu') {
+        if (scores.p1 > scores.cpu) resultMsg = "¡LE GANASTE A LA IA!";
+        else if (scores.cpu > scores.p1) resultMsg = "¡LA CONSOLA TE HA GANADO!";
+        else resultMsg = "¡EMPATE TÉCNICO!";
+    }
+
+    winText.innerText = resultMsg;
+    
+    const statsText = `Tiempo: ${document.getElementById('timer').innerText} | Errores: ${errors}`;
+    const scoreText = (gameMode !== 'solo') ? `<br>Tu Score: ${scores.p1} | IA: ${scores.cpu || scores.p2}` : "";
+    document.getElementById('final-stats').innerHTML = statsText + scoreText;
+}
+
+function resetGame() {
+    document.getElementById('overlay').classList.add('hidden');
+    document.getElementById('board').classList.add('hidden');
+    document.getElementById('status-area').classList.add('hidden');
+    document.getElementById('prep-message').classList.add('hidden');
+    document.getElementById('menu').classList.remove('hidden');
+    clearInterval(timerInterval);
+    clearInterval(prepInterval);
+}
+</script>
+</body>
+</html>
